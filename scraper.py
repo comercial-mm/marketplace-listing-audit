@@ -1,4 +1,6 @@
 import re
+import sys
+import traceback
 from pathlib import Path
 from datetime import date
 import json
@@ -88,15 +90,17 @@ def scrape_amazon_br(url: str) -> dict:
         from scrapling.fetchers import StealthyFetcher
         page = StealthyFetcher().fetch(url, headless=True, timeout=30000)
     except Exception as e:
+        print(f"[scraper] EXCEPTION fetching {url}: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
         msg = str(e).lower()
         if "timeout" in msg:
-            return {**base, "error": "timeout"}
-        return {**base, "error": "blocked"}
+            return {**base, "error": f"timeout: {type(e).__name__}: {str(e)[:200]}"}
+        return {**base, "error": f"blocked: {type(e).__name__}: {str(e)[:200]}"}
 
     if page.status == 404:
         return {**base, "error": "404"}
     if page.status >= 400:
-        return {**base, "error": "blocked"}
+        return {**base, "error": f"http_{page.status}"}
 
     parsed = parse_amazon_html(page.html_content)
     return {"url": url, "ok": True, "error": None, **parsed}
