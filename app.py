@@ -1,3 +1,5 @@
+import time
+
 import streamlit as st
 import pandas as pd
 from scraper import scrape_amazon_br
@@ -167,12 +169,14 @@ if st.button("Rodar verificação", type="primary"):
     st.session_state["should_run"] = True
 
 
-def _run_audit(rows: list[dict]) -> list[dict]:
+def _run_audit(rows: list[dict]) -> tuple[list[dict], float]:
     results = []
     valid_rows = [r for r in rows if (r.get("URL") or "").strip()]
     if not valid_rows:
-        return results
-    progress = st.progress(0, text="Buscando URLs...")
+        return results, 0.0
+    n = len(valid_rows)
+    t0 = time.perf_counter()
+    progress = st.progress(0.0, text=f"Buscando URLs... 0/{n}")
     for i, row in enumerate(valid_rows):
         scrape = scrape_amazon_br(row["URL"])
         ean_esp = (row.get("EAN esperado") or "").strip() or None
@@ -182,7 +186,6 @@ def _run_audit(rows: list[dict]) -> list[dict]:
             "ean_esperado": ean_esp,
         }
         verdict = classify(scrape, expected)
-        # Adiciona campo derivado pra coluna "EAN bate?"
         if not ean_esp:
             ean_match = "—"
         elif scrape.get("ean") is None:
@@ -192,15 +195,20 @@ def _run_audit(rows: list[dict]) -> list[dict]:
         else:
             ean_match = "❌"
         results.append({**scrape, **verdict, "ean_match": ean_match})
-        progress.progress((i + 1) / len(valid_rows))
+        elapsed = time.perf_counter() - t0
+        progress.progress((i + 1) / n, text=f"Buscando URLs... {i+1}/{n} ({elapsed:.1f}s)")
     progress.empty()
-    return results
+    return results, time.perf_counter() - t0
 
 
-def _render_output(results: list[dict]):
+def _render_output(results: list[dict], elapsed_s: float):
     counts = {"ok": 0, "problema": 0, "nao_verificavel": 0}
     for r in results:
         counts[r["status"]] += 1
+
+    n = len(results)
+    avg = elapsed_s / n if n else 0.0
+    st.caption(f"⏱ Auditou {n} URL(s) em {elapsed_s:.1f}s · média {avg:.1f}s/URL")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("🟢 OK", counts["ok"])
@@ -228,7 +236,7 @@ def _render_output(results: list[dict]):
 if st.session_state.get("should_run") and st.session_state.get("input_rows"):
     st.divider()
     st.subheader("Resultado")
-    results = _run_audit(st.session_state["input_rows"])
+    results, elapsed = _run_audit(st.session_state["input_rows"])
     if not results:
         st.warning("Nenhuma URL preenchida.")
     else:
@@ -237,5 +245,5 @@ if st.session_state.get("should_run") and st.session_state.get("input_rows"):
             st.error("Limite diário de uso justo do MVP atingido. "
                      "Volte amanhã. Se precisar de mais volume, fale com o Felipe pra evoluir pra V1.")
         else:
-            _render_output(results)
+            _render_output(results, elapsed)
     st.session_state["should_run"] = False
