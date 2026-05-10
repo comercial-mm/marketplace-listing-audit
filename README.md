@@ -9,6 +9,23 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+### Mac Intel: `_SCDynamicStoreCopyProxies` ImportError
+
+O wheel padrão de `curl_cffi >= 0.14.0` (puxado por `scrapling[fetchers]`)
+tem bug de linkage no macOS Intel x86_64 (não linka com framework
+SystemConfiguration). Workaround é forçar curl_cffi 0.7.4 só localmente:
+
+```bash
+python3.13 -m venv .venv-scrapling
+source .venv-scrapling/bin/activate
+pip install "scrapling[fetchers]"
+pip install "curl_cffi==0.7.4"  # downgrade pós scrapling
+scrapling install                # baixa browsers Camoufox/Chromium
+```
+
+No Streamlit Cloud (Linux x86_64) o wheel padrão funciona, então
+`requirements.txt` não pinna curl_cffi.
+
 ## Deploy
 
 Streamlit Community Cloud. Conectar repo público; entrypoint `app.py`.

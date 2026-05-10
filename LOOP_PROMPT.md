@@ -1,56 +1,74 @@
-# Ralph Loop — Reckitt MVP Local Extraction
+# Ralph Loop — Scrapling local working
 
 ## Goal
 
-Make `python3.11 local_smoke.py` exit 0 (5/5 SKUs PASS) from this directory.
+Fazer `StealthyFetcher().fetch(url, headless=True)` rodar com sucesso em ambiente local Mac Intel (Darwin x86_64), retornando HTML > 100KB de uma URL Amazon BR.
 
 ## Current state
 
-Baseline: 3/5 PASS. Veja (R$ 0,01) e Harpic (R$ 0,03) falham porque a regex de preço em `scraper.py::_extract_price` pega "preço por unidade" (`apex-priceperunit-value`) ou "você economiza" antes da Buy Box real (`apex-pricetopay-value` / `priceToPay`).
+- Mac: macOS Monterey 12.x, Intel x86_64.
+- Homebrew Python 3.13.7 instalado em `/usr/local/bin/python3.13`.
+- Venv em `/Users/fcamara/Projects/Claude/builder/.venv-scrapling/` com `scrapling[fetchers]` instalado.
+- `scrapling install` rodou parcialmente (Playwright browsers + dependencies). publicsuffix.org SSL warning — não-fatal.
+- **Erro atual**: `from scrapling.fetchers import StealthyFetcher` levanta:
+  ```
+  ImportError: dlopen(.../curl_cffi/_wrapper.abi3.so, 0x0002):
+  symbol not found in flat namespace (_SCDynamicStoreCopyProxies)
+  ```
+- Causa: o wheel pré-compilado de `curl_cffi` (versão atual instalada) não linka com framework `SystemConfiguration` do macOS. `otool -L` mostra só `libc++` e `libSystem.B.dylib`, falta `/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration`.
 
-## Success criterion (verbatim, do not change)
+## Success criterion (verbatim)
 
 ```bash
+source /Users/fcamara/Projects/Claude/builder/.venv-scrapling/bin/activate
 cd /Users/fcamara/Projects/Claude/builder/experiments/2026-05-10-reckitt-audit-mvp
-python3.11 local_smoke.py
+python -c "
+from scrapling.fetchers import StealthyFetcher
+p = StealthyFetcher().fetch('https://www.amazon.com.br/dp/B07PNK7TZK', headless=True, timeout=30000)
+assert p.status == 200, f'status={p.status}'
+assert len(p.html_content) > 100000, f'len={len(p.html_content)}'
+print('OK', p.status, len(p.html_content))
+"
 ```
 
-Exit code 0 + `=== 5/5 passed ===` na última linha.
+Exit 0 e print `OK 200 <len>`.
 
-## Constraints
+## Approaches to try (in order)
 
-- **Don't modify** `local_smoke.py`, `comparator.py`, `app.py`, `examples/reckitt_5_skus.py`, `tests/test_comparator.py`. Only `scraper.py` (and possibly `requirements.txt` and `tests/test_scraper.py`).
-- **Pytest must continue green**: rodar `python3.11 -m pytest tests/ -v` após qualquer mudança. Não regredir.
-- **Não chamar Amazon excessivamente**: cada iteração que chama `scrape_amazon_br` faz 1 request HTTP por SKU. Salvar HTML em fixture e iterar offline quando possível.
+1. **Recompile curl_cffi from source**: `pip uninstall curl_cffi -y && pip install --no-binary=:all: curl_cffi`. Requer libcurl headers (`brew install curl-impersonate` ou similar). Após compile, conferir `otool -L` mostra SystemConfiguration framework.
 
-## Approaches to try (in order, escalating)
+2. **Versão alternativa de curl_cffi**: testar `pip install 'curl_cffi==0.7.4'`, `0.8.0`, etc, até achar wheel que linke corretamente. Listar versões: `pip index versions curl_cffi`.
 
-1. **Buy Box-anchored regex**: encontrar `apex-pricetopay-value` ou `priceToPay` no HTML, e a partir desse índice procurar o próximo span de preço (pode estar em `a-price-whole` + `a-price-fraction`, não em `a-offscreen`).
-2. **Filtrar a-offscreen ignorando context "perUnit", "basisprice", "strike"**: scan dos `<span class="a-offscreen">R$X</span>` e ignorar os que estão dentro de elementos com `apex-priceperunit-value`, `apex-basisprice-value`, `data-a-strike="true"`, ou cuja string anterior contém "Você economiza" / "De:" / "por unidade".
-3. **a-price-whole / a-price-fraction**: a Buy Box renderiza preço como `<span class="a-price-whole">8</span><span class="a-price-fraction">29</span>` — extrair os dois e combinar.
-4. **JSON-LD inline**: procurar `<script type="application/ld+json">` com schema `Product` e extrair `offers.price`.
-5. **Mediana / heurística**: dentre todos os preços encontrados na página, pegar a mediana ou o maior abaixo de R$ 500. Buy Box raramente é o menor (cents de desconto) nem o maior (oferta cara de revenda).
-6. **Install Scrapling deps que faltam**: o erro stealthy é `ModuleNotFoundError: No module named 'patchright'`. Rodar `pip3.11 install patchright camoufox playwright` e ver se StealthyFetcher passa a funcionar local. Cuidado: `curl_cffi` no macOS tem bug `_SCDynamicStoreCopyProxies` — pode bloquear. Se conseguir Scrapling local, é a melhor opção (mais robusto contra Amazon).
-7. **Cache HTML local**: salvar HTML dos 5 SKUs em `tests/fixtures/*.html` na primeira iteração que rodar OK, e desenvolver/iterar regex contra fixture (zero rede, instantâneo).
+3. **Install via conda-forge**: `conda install -c conda-forge curl-cffi` — pode ter wheel diferente. Requer miniconda/mambaforge.
+
+4. **install_name_tool patch**: `install_name_tool -change @rpath/SystemConfiguration.framework/SystemConfiguration /System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration .../_wrapper.abi3.so`. Ajusta o linkage do binário existente.
+
+5. **Setar DYLD_FORCE_FLAT_NAMESPACE=0**: env var pra forçar two-level namespace na carga do .so. `DYLD_FORCE_FLAT_NAMESPACE=0 python -c "..."`.
+
+6. **Set `DYLD_FALLBACK_FRAMEWORK_PATH`**: apontar pra location de SystemConfiguration. `DYLD_FALLBACK_FRAMEWORK_PATH=/System/Library/Frameworks python ...`.
+
+7. **Use system Python (não framework)**: `/usr/bin/python3` é o Python do macOS (linka com tudo do sistema). Criar venv com ele e tentar.
+
+8. **Use DynamicFetcher em vez de StealthyFetcher**: DynamicFetcher usa Playwright direto (sem Camoufox/curl_cffi). Pode dar resultado equivalente sem o problema do curl_cffi. Validar se `from scrapling.fetchers import DynamicFetcher; DynamicFetcher().fetch(url)` funciona.
+
+9. **Bypass curl_cffi**: encontrar import path no scrapling que não dispara import de curl_cffi. Pode haver feature flag ou flag de runtime.
 
 ## Workflow per iteration
 
-1. Hipótese: qual approach acima.
-2. Editar `scraper.py::_extract_price` (e/ou helpers).
-3. Rodar `python3.11 -m pytest tests/ -v` — verde?
-4. Rodar `python3.11 local_smoke.py` — quantos passam?
-5. Se 5/5 → done.
-6. Se regrediu (menos que baseline 3/5) → reverter ou ajustar.
-7. Loop.
+1. Hipótese: qual approach.
+2. Executar comando(s).
+3. Rodar success criterion bash above.
+4. Se OK → done.
+5. Se falhar → registrar erro, próxima approach.
 
 ## Stop conditions
 
-- 5/5 PASS no local_smoke.py.
-- OU: tentou todos os approaches 1-7 sem sucesso → reporta lista de approaches tentados e razão de cada falha. Não tenta caminhos não listados sem reportar.
+- Critério atinge OK.
+- OU: tentou todos approaches 1-9 sem sucesso → reportar lista de tentativas e razão de cada falha. Considerar cair pra fallback `requests` permanentemente.
 
 ## Hard rules
 
-- Nunca pular `pytest`.
-- Nunca chamar mais de 5 URLs por iteração (1 por SKU). Cache em fixture se for iterar mais.
-- Nunca commitar nem fazer push pra remote.
-- Mantenha logs em stderr verbose pra debug.
+- Não mudar código do app/scraper só pra contornar o problema do StealthyFetcher (esse é objetivo separado). Foco aqui é fazer Scrapling rodar local.
+- Não rodar `pip install` que afete o venv da vault principal. Só mexer em `.venv-scrapling`.
+- Não chamar Amazon mais de 5 vezes (1 por iteração só).
+- Logs verbose pra debug.
