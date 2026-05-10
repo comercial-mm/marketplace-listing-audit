@@ -7,6 +7,28 @@ from examples.reckitt_5_skus import EXAMPLE_SKUS
 
 st.set_page_config(page_title="MVP Reckitt Audit", layout="wide")
 
+
+@st.cache_resource
+def _ensure_scrapling_browsers() -> tuple[bool, str]:
+    """Roda `scrapling install` uma vez por container pra baixar browsers stealth
+    (Camoufox/Chromium). Em Streamlit Cloud o filesystem é efêmero, então pode
+    repetir a cada cold start (~30-60s na primeira execução)."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["scrapling", "install"],
+            capture_output=True, text=True, timeout=180,
+        )
+        ok = result.returncode == 0
+        out = (result.stdout or "")[-300:] + " | " + (result.stderr or "")[-300:]
+        return ok, out
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+with st.spinner("Preparando ambiente de scraping (~30s na primeira abertura)..."):
+    _SCRAPLING_INSTALL_OK, _SCRAPLING_INSTALL_INFO = _ensure_scrapling_browsers()
+
 st.title("MVP para Giulia, da Reckitt")
 st.caption("Confere preço, disponibilidade e EAN dos seus URLs Amazon BR contra o esperado. "
            "Pra validar alertas da Lett mais rápido.")
@@ -35,6 +57,9 @@ st.info("Primeira abertura pode demorar ~30s (app dorme com inatividade).")
 
 with st.expander("🔧 Diagnóstico do servidor", expanded=False):
     st.caption("Testa qual fetcher de scraping consegue rodar neste ambiente.")
+    st.write(f"**`scrapling install`** boot: {'✅ ok' if _SCRAPLING_INSTALL_OK else '❌ falhou'}")
+    if not _SCRAPLING_INSTALL_OK:
+        st.code(_SCRAPLING_INSTALL_INFO[:500])
     if st.button("Rodar diagnóstico"):
         import sys as _sys
         import platform as _platform
