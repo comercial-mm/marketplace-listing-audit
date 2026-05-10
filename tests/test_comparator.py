@@ -60,6 +60,15 @@ def test_classify_ignora_ean_quando_nao_esperado():
     assert result["status"] == "ok"
 
 
+def test_classify_ignora_preco_quando_esperado_zero():
+    """Linha vazia no data_editor tem preco_esperado=0. Não deve flagar preço."""
+    scrape = {"url": "x", "ok": True, "error": None, "title": "T",
+              "price": 25.0, "available": True, "ean": "X"}
+    expected = {"preco_esperado": 0.0, "tolerancia_pct": 10, "ean_esperado": None}
+    result = classify(scrape, expected)
+    assert result["status"] == "ok"
+
+
 def test_classify_nao_verificavel_quando_scrape_falhou():
     scrape = {"url": "x", "ok": False, "error": "blocked",
               "title": None, "price": None, "available": None, "ean": None}
