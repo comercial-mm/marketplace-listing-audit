@@ -1,5 +1,7 @@
 streamlit>=1.32,<2.0
 scrapling>=0.4.7,<0.5
+curl_cffi>=0.7
+patchright>=1.40
 pytest>=8.0
 pandas>=2.0
 requests>=2.28
