@@ -54,9 +54,14 @@ def _parse_price(v) -> float:
         return 0.0
 
 
+def _fmt_brl(v: float) -> str:
+    """39.0 → '39,00' (formato pt-BR pro data_editor TextColumn)."""
+    return f"{v:.2f}".replace(".", ",")
+
+
 def _example_rows() -> list[dict]:
     return [
-        {"URL": s["url"], "Preço esperado (R$)": s["preco_esperado"],
+        {"URL": s["url"], "Preço esperado (R$)": _fmt_brl(s["preco_esperado"]),
          "Tolerância (%)": 10, "EAN esperado": s["ean_esperado"]}
         for s in EXAMPLE_SKUS
     ]
@@ -133,17 +138,10 @@ st.write("Cola URLs alertadas pela Lett (4 colunas, dá pra colar direto do Goog
 if "input_rows" not in st.session_state:
     st.session_state["input_rows"] = _example_rows()
 
-bcol1, bcol2, _ = st.columns([1, 1, 4])
-with bcol1:
-    if st.button("Limpar tudo"):
-        st.session_state["input_rows"] = _empty_rows()
-        st.session_state["should_run"] = False
-        st.rerun()
-with bcol2:
-    if st.button("Resetar exemplo"):
-        st.session_state["input_rows"] = _example_rows()
-        st.session_state["should_run"] = False
-        st.rerun()
+if st.button("Limpar tudo"):
+    st.session_state["input_rows"] = _empty_rows()
+    st.session_state["should_run"] = False
+    st.rerun()
 
 default_df = pd.DataFrame(st.session_state["input_rows"])
 
