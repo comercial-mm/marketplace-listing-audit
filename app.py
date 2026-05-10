@@ -27,7 +27,44 @@ def _ensure_scrapling_browsers() -> tuple[bool, str]:
 
 
 with st.spinner("Preparando ambiente de scraping (~30s na primeira abertura)..."):
-    _SCRAPLING_INSTALL_OK, _SCRAPLING_INSTALL_INFO = _ensure_scrapling_browsers()
+    _ensure_scrapling_browsers()
+
+
+def _parse_price(v) -> float:
+    """Aceita float, int ou string com decimal em '.' ou ','. Útil pra paste de
+    Google Sheets em pt-BR (vírgula) ou en-US (ponto)."""
+    if v is None or v == "":
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().replace("R$", "").replace(" ", "").replace("\xa0", "")
+    if not s:
+        return 0.0
+    if "," in s and "." in s:
+        # heurística: o último separador é decimal, o anterior é milhar
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _example_rows() -> list[dict]:
+    return [
+        {"URL": s["url"], "Preço esperado (R$)": s["preco_esperado"],
+         "Tolerância (%)": 10, "EAN esperado": s["ean_esperado"]}
+        for s in EXAMPLE_SKUS
+    ]
+
+
+def _empty_rows() -> list[dict]:
+    return [{"URL": "", "Preço esperado (R$)": "", "Tolerância (%)": 10, "EAN esperado": ""}]
+
 
 st.title("MVP para Giulia, da Reckitt")
 st.caption("Confere preço, disponibilidade e EAN dos seus URLs Amazon BR contra o esperado. "
@@ -42,8 +79,7 @@ with st.expander("Sobre este MVP", expanded=False):
 - Auditoria de preço da Buy Box (oferta principal), com tolerância configurável.
 - Verificação opcional de EAN: anúncio aponta pro produto certo (detecta troca de produto).
 - Apenas Amazon BR.
-- Input via colagem manual em tabela editável dentro do app.
-- Modo "exemplo Reckitt": 5 SKUs do PDF pré-populados pra descoberta zero-fricção.
+- Input via colagem manual em tabela editável (cola direto do Google Sheets).
 
 **Não inclui (fica pra V1+)**:
 - Conteúdo (título, descrição, imagens).
@@ -55,65 +91,61 @@ with st.expander("Sobre este MVP", expanded=False):
 
 st.info("Primeira abertura pode demorar ~30s (app dorme com inatividade).")
 
-with st.expander("🔧 Diagnóstico do servidor", expanded=False):
-    st.caption("Testa qual fetcher de scraping consegue rodar neste ambiente.")
-    st.write(f"**`scrapling install`** boot: {'✅ ok' if _SCRAPLING_INSTALL_OK else '❌ falhou'}")
-    if not _SCRAPLING_INSTALL_OK:
-        st.code(_SCRAPLING_INSTALL_INFO[:500])
-    if st.button("Rodar diagnóstico"):
-        import sys as _sys
-        import platform as _platform
-        st.write(f"**Python**: {_platform.python_version()} ({_sys.platform})")
-        # Scrapling import
-        try:
-            from scrapling.fetchers import StealthyFetcher  # type: ignore
-            st.success("✅ Scrapling import OK")
-            try:
-                _page = StealthyFetcher().fetch(
-                    "https://www.amazon.com.br/dp/B07PNK7TZK",
-                    headless=True, timeout=30000,
-                )
-                st.success(f"✅ StealthyFetcher fetch OK: status={_page.status} len={len(_page.html_content)}")
-            except Exception as _e:
-                st.error(f"❌ StealthyFetcher fetch falhou: {type(_e).__name__}: {str(_e)[:300]}")
-        except Exception as _e:
-            st.error(f"❌ Scrapling import falhou: {type(_e).__name__}: {str(_e)[:300]}")
-        # requests fallback
-        try:
-            import requests as _req
-            _r = _req.get(
-                "https://www.amazon.com.br/dp/B07PNK7TZK",
-                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                         "Accept-Language": "pt-BR,pt;q=0.9"},
-                timeout=15)
-            st.success(f"✅ requests fallback OK: status={_r.status_code} len={len(_r.text)}")
-        except Exception as _e:
-            st.error(f"❌ requests fallback falhou: {type(_e).__name__}: {str(_e)[:300]}")
+# ----------------------------------------------------------------------------
+# Diagnóstico do servidor — desativado pra V0 (manter código pra V1).
+# Reativar comentando o `if False:` abaixo se precisar debugar fetcher.
+# ----------------------------------------------------------------------------
+# with st.expander("🔧 Diagnóstico do servidor", expanded=False):
+#     st.caption("Testa qual fetcher de scraping consegue rodar neste ambiente.")
+#     if st.button("Rodar diagnóstico"):
+#         import sys as _sys
+#         import platform as _platform
+#         st.write(f"**Python**: {_platform.python_version()} ({_sys.platform})")
+#         try:
+#             from scrapling.fetchers import StealthyFetcher
+#             st.success("✅ Scrapling import OK")
+#             try:
+#                 _page = StealthyFetcher().fetch(
+#                     "https://www.amazon.com.br/dp/B07PNK7TZK",
+#                     headless=True, timeout=30000)
+#                 st.success(f"✅ StealthyFetcher fetch OK: status={_page.status} len={len(_page.html_content)}")
+#             except Exception as _e:
+#                 st.error(f"❌ StealthyFetcher fetch falhou: {type(_e).__name__}: {str(_e)[:300]}")
+#         except Exception as _e:
+#             st.error(f"❌ Scrapling import falhou: {type(_e).__name__}: {str(_e)[:300]}")
+#         try:
+#             import requests as _req
+#             _r = _req.get(
+#                 "https://www.amazon.com.br/dp/B07PNK7TZK",
+#                 headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+#                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+#                          "Accept-Language": "pt-BR,pt;q=0.9"},
+#                 timeout=15)
+#             st.success(f"✅ requests fallback OK: status={_r.status_code} len={len(_r.text)}")
+#         except Exception as _e:
+#             st.error(f"❌ requests fallback falhou: {type(_e).__name__}: {str(_e)[:300]}")
 
 st.divider()
-st.subheader("Modo 1 — Rodar exemplo Reckitt")
-st.write("Testa os 5 SKUs do PDF MVP_Reckitt sem precisar colar nada.")
+st.subheader("Lista de URLs pra auditar")
+st.write("Cola URLs alertadas pela Lett (4 colunas, dá pra colar direto do Google Sheets). "
+         "Os 5 SKUs do PDF Reckitt já vêm preenchidos como exemplo.")
 
-if st.button("▶ Rodar exemplo Reckitt", type="primary"):
-    rows = [
-        {"URL": s["url"], "Preço esperado (R$)": s["preco_esperado"],
-         "Tolerância (%)": s["tolerancia_pct"], "EAN esperado": s["ean_esperado"]}
-        for s in EXAMPLE_SKUS
-    ]
-    st.session_state["input_rows"] = rows
-    st.session_state["should_run"] = True
+if "input_rows" not in st.session_state:
+    st.session_state["input_rows"] = _example_rows()
 
-st.divider()
-st.subheader("Modo 2 — Rodar minha lista")
-st.write("Cola URLs alertadas pela Lett, com preço esperado. Tolerância em % e EAN são opcionais.")
+bcol1, bcol2, _ = st.columns([1, 1, 4])
+with bcol1:
+    if st.button("Limpar tudo"):
+        st.session_state["input_rows"] = _empty_rows()
+        st.session_state["should_run"] = False
+        st.rerun()
+with bcol2:
+    if st.button("Resetar exemplo"):
+        st.session_state["input_rows"] = _example_rows()
+        st.session_state["should_run"] = False
+        st.rerun()
 
-default_df = pd.DataFrame(
-    st.session_state.get("input_rows", [
-        {"URL": "", "Preço esperado (R$)": 0.0, "Tolerância (%)": 10,
-         "EAN esperado": ""}
-    ])
-)
+default_df = pd.DataFrame(st.session_state["input_rows"])
 
 edited = st.data_editor(
     default_df,
@@ -121,7 +153,9 @@ edited = st.data_editor(
     use_container_width=True,
     column_config={
         "URL": st.column_config.TextColumn("URL", required=True),
-        "Preço esperado (R$)": st.column_config.NumberColumn(format="%.2f", min_value=0.0),
+        "Preço esperado (R$)": st.column_config.TextColumn(
+            "Preço esperado (R$)",
+            help="Aceita ponto ou vírgula como separador decimal."),
         "Tolerância (%)": st.column_config.NumberColumn(min_value=0, max_value=100, default=10),
         "EAN esperado": st.column_config.TextColumn(
             "EAN esperado",
@@ -130,14 +164,14 @@ edited = st.data_editor(
     key="data_editor",
 )
 
-if st.button("Rodar verificação"):
+if st.button("Rodar verificação", type="primary"):
     st.session_state["input_rows"] = edited.to_dict("records")
     st.session_state["should_run"] = True
 
 
 def _run_audit(rows: list[dict]) -> list[dict]:
     results = []
-    valid_rows = [r for r in rows if r.get("URL", "").strip()]
+    valid_rows = [r for r in rows if (r.get("URL") or "").strip()]
     if not valid_rows:
         return results
     progress = st.progress(0, text="Buscando URLs...")
@@ -145,12 +179,21 @@ def _run_audit(rows: list[dict]) -> list[dict]:
         scrape = scrape_amazon_br(row["URL"])
         ean_esp = (row.get("EAN esperado") or "").strip() or None
         expected = {
-            "preco_esperado": float(row.get("Preço esperado (R$)") or 0),
+            "preco_esperado": _parse_price(row.get("Preço esperado (R$)")),
             "tolerancia_pct": float(row.get("Tolerância (%)") or 10),
             "ean_esperado": ean_esp,
         }
         verdict = classify(scrape, expected)
-        results.append({**scrape, **verdict})
+        # Adiciona campo derivado pra coluna "EAN bate?"
+        if not ean_esp:
+            ean_match = "—"
+        elif scrape.get("ean") is None:
+            ean_match = "—"
+        elif scrape.get("ean") == ean_esp:
+            ean_match = "✅"
+        else:
+            ean_match = "❌"
+        results.append({**scrape, **verdict, "ean_match": ean_match})
         progress.progress((i + 1) / len(valid_rows))
     progress.empty()
     return results
@@ -172,7 +215,7 @@ def _render_output(results: list[dict]):
         "Título extraído": r.get("title") or "—",
         "Preço extraído": f"R$ {r['price']:.2f}" if r.get("price") else "—",
         "Disponível?": "Sim" if r.get("available") else ("Não" if r.get("available") is False else "—"),
-        "EAN extraído": r.get("ean") or "—",
+        "EAN bate?": r.get("ean_match", "—"),
         "Razão": "; ".join(r.get("flags", [])) or "—",
         "URL": r.get("url"),
     } for r in results])
