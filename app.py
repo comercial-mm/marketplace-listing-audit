@@ -33,6 +33,39 @@ with st.expander("Sobre este MVP", expanded=False):
 
 st.info("Primeira abertura pode demorar ~30s (app dorme com inatividade).")
 
+with st.expander("🔧 Diagnóstico do servidor", expanded=False):
+    st.caption("Testa qual fetcher de scraping consegue rodar neste ambiente.")
+    if st.button("Rodar diagnóstico"):
+        import sys as _sys
+        import platform as _platform
+        st.write(f"**Python**: {_platform.python_version()} ({_sys.platform})")
+        # Scrapling import
+        try:
+            from scrapling.fetchers import StealthyFetcher  # type: ignore
+            st.success("✅ Scrapling import OK")
+            try:
+                _page = StealthyFetcher().fetch(
+                    "https://www.amazon.com.br/dp/B07PNK7TZK",
+                    headless=True, timeout=30000,
+                )
+                st.success(f"✅ StealthyFetcher fetch OK: status={_page.status} len={len(_page.html_content)}")
+            except Exception as _e:
+                st.error(f"❌ StealthyFetcher fetch falhou: {type(_e).__name__}: {str(_e)[:300]}")
+        except Exception as _e:
+            st.error(f"❌ Scrapling import falhou: {type(_e).__name__}: {str(_e)[:300]}")
+        # requests fallback
+        try:
+            import requests as _req
+            _r = _req.get(
+                "https://www.amazon.com.br/dp/B07PNK7TZK",
+                headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                         "Accept-Language": "pt-BR,pt;q=0.9"},
+                timeout=15)
+            st.success(f"✅ requests fallback OK: status={_r.status_code} len={len(_r.text)}")
+        except Exception as _e:
+            st.error(f"❌ requests fallback falhou: {type(_e).__name__}: {str(_e)[:300]}")
+
 st.divider()
 st.subheader("Modo 1 — Rodar exemplo Reckitt")
 st.write("Testa os 5 SKUs do PDF MVP_Reckitt sem precisar colar nada.")
