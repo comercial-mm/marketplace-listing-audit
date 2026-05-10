@@ -1,0 +1,4 @@
+streamlit>=1.32,<2.0
+scrapling>=0.4.7,<0.5
+pytest>=8.0
+pandas>=2.0
